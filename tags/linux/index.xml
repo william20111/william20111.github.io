@@ -1,24 +1,15 @@
 <?xml version="1.0" encoding="utf-8" standalone="yes" ?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>grumpysysadm</title>
-    <link>https://william20111.github.io/</link>
-    <description>Recent content on grumpysysadm</description>
+    <title>Linux on grumpysysadm</title>
+    <link>https://william20111.github.io/tags/linux/</link>
+    <description>Recent content in Linux on grumpysysadm</description>
     <generator>Hugo -- gohugo.io</generator>
     <language>en-us</language>
-    <lastBuildDate>Wed, 27 Feb 2019 13:23:10 +0100</lastBuildDate>
+    <lastBuildDate>Mon, 21 Aug 2017 13:23:10 +0100</lastBuildDate>
     
-	<atom:link href="https://william20111.github.io/index.xml" rel="self" type="application/rss+xml" />
+	<atom:link href="https://william20111.github.io/tags/linux/index.xml" rel="self" type="application/rss+xml" />
     
-    
-    <item>
-      <title>New Blog</title>
-      <link>https://william20111.github.io/posts/new-blog/</link>
-      <pubDate>Wed, 27 Feb 2019 13:23:10 +0100</pubDate>
-      
-      <guid>https://william20111.github.io/posts/new-blog/</guid>
-      <description>Hey Ho, new blog on hugo and github pages, hoping to post some new content soon.</description>
-    </item>
     
     <item>
       <title>SYN Cookies &amp; Linux</title>

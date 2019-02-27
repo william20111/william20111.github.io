@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en-us">
+    <head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	
+		<title>
+				SYN Cookies &amp; Linux &middot; grumpysysadm
+		</title>
+	
+		
+  		<link rel="stylesheet" href="/css/style.css">
+		<link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Libre+Baskerville:400,400i,700">
+	
+		
+		<link rel="icon" type="image/png" sizes="32x32" href="/images/favicon-32x32.png">
+		<link rel="icon" type="image/png" sizes="16x16" href="/images/favicon-16x16.png">
+		<link rel="apple-touch-icon" sizes="180x180" href="/images/apple-touch-icon.png">
+	
+		
+		<link href="" rel="alternate" type="application/rss+xml" title="grumpysysadm" />
+	</head>
+	
+    <body>
+        		<nav class="nav">
+			<div class="nav-container">
+				<a href="/">
+					<h2 class="nav-title">grumpysysadm</h2>
+				</a>
+				<ul>
+    <li><a href="/about">About</a></li>
+    <li><a href="/">Posts</a></li>
+</ul>
+			</div>
+		</nav>
+
+        
+
+<main>
+	<div class="post">
+		<div class="post-info">
+    <span>Written by</span>
+        
+        <br>
+        <span>on&nbsp;</span><time datetime="2017-08-21 13:23:10 &#43;0100 BST">August 21, 2017</time>
+</div>
+		<h1 class="post-title">SYN Cookies &amp; Linux</h1>
+<div class="post-line"></div>
+
+		
+
+		<p>This started as debugging application timeouts and turned into a deep dive into linux tcp ip stack
+writing my own netlink query tools. Might be long. Might be rambling. Any comments appreciated.</p>
+
+<p>Recently when debugging a timeout issues on a java application, I stumbled upon an interesting problem.
+The application was making requests to a Loab balancer virtual IP and getting a connection timeout exception
+in the logs. Unsure of why this was i went poking into nstat counters to see how the LBdealing with all
+its connections.</p>
+
+<p>The LB takes thousands of connections a second which i would consider a fairly busy server. <code>net.core.somaxconn</code>
+is the argument provided to the listen syscall. By default its 128 in ubuntu 14.04. Because it was under high
+load the server had filled the listen queue almost instantly. Then quickly after filled the SYN queue.
+Which is defined by the kernel param <code>net.ipv4.tcp_max_syn_backlog</code>. This is the queue length for how many SYN connections the kernel can backup once the listen queue is full. Both of these settings were causing very poor networking performance.</p>
+So the default settings are not high enough for dealing with heavy traffic loads. The server quickly defaulted to using SYN cookies to deal with the large connection count. If your server has the following option enabled.</p></p>
+
+<pre><code>net.ipv4.tcp_syncookies = 1
+</code></pre>
+
+<p>SYN cookies are not a bad thing they will make your server look very fast at responding under high load because the connection is not queued. Im not going to head into serious detail on syn cookies and how they work. But both of these links are great and helped me understand my issue more. Nom Nom hence the article pciture!</p></p>
+
+<ul>
+<li>This link to github engineering blog explains syn floods and the handshake in <a href="http://githubengineering.com/syn-flood-mitigation-with-synsanity/">detail</a></li>
+<li>This link talks about <a href="http://blog.dubbelboer.com/2012/04/09/syn-cookies.html">syn floods</a></li>
+</ul>
+
+<pre><code class="language-shell">TcpExtSyncookiesSent
+TcpExtSyncookiesRecv
+TcpExtSyncookiesFailed
+TcpExtPruneCalled
+TcpExtTW
+TcpExtListenDrops
+TcpExtTCPTimeouts
+</code></pre>
+
+<p>Some useful metrics to track above. Can get these from snmpd if you use it
+The issue that was plaguing the load balancer was that when the TCP handshake is being negotiated with SYN cookies the connection is not actually opened straight away. Only once the final ACK is received by the server it will be opened. But if both the listen queue &amp; the syn queue are full the connection will just be dropped upon the arrival of the ACK. Because the client has already assumed the connection is opened, you will get a timeout on the client side. So SYN cookies are useful for taking load of the server during high network bursts but due to the full queues it was causing problems.</p>
+Another issue you might hit at this high network workloads is that the number of connections will fill the time wait bucket. The kernel can only handle so many sockets in tw state. Chances are if your 1 ip:port bound this wont affect you. But if you have multiple instances of application or mulitple IPs bound for the application you can hit this quite easily. In Ubuntu 14.04 <strong>net.ipv4.tcp_max_tw_buckets = 32768</strong> is the number of TW connections you can hold. This is actually quite a sensible limit because you will struggle to saturate this with standard configurations. If you reach this the kernel will start to prune connections from the TW bucket which isnt a good thing as TW is useful and part of the TCP standard for a reason. If you are dealing with lots of connections then this problem may creep up on you slowly. Increase number if you start to hit issues. But its very dependant on your rates of connections. There are other ways to deal with TW sockets mentioned in the blog below and I encourage you to read it as they all have different affects.
+More handshake diagrams &amp; an outstanding post on time-wait state <a href="https://vincent.bernat.im/en/blog/2014-tcp-time-wait-state-linux.html">Time Wait</a></li>
+All this investigation lead me into doing lots of reading into kernel metrics and counters for tcp connections.  </p></p>
+
+<pre><code class="language-shell">/proc/net/tcp
+/proc/net/tcp6
+</code></pre>
+
+<p>These files in proc hold the socket state tables for IPV4 and V6. The information can be easily parsed and this is exactly what <strong>netstat</strong> does. I wrote my own python tooling to query this to then send metrics and data to endpoints like statsd. That was until I tried to run it on a busy box with a large tcp socket table. The tooling didnt scale at all and chewed far to much CPU when trying to read and parse the file. So how does <strong>ss</strong> work and why is it so fast? A poke about in the source and a few straces later I discovered Netlink.</p>
+<p>Netlink is great for polling for server statistics with low overhead, and in this case to do passive low resource tcp monitoring. <strong>netstat</strong> parses proc but the new iproute tooling (which you should be using) querys netlink in some cases and avoids parsing stuff in proc. <strong>ss</strong> state querys using inet_diag struct below.</p>
+
+<pre><code>struct inet_diag_req_v2 {
+       __u8    sdiag_family;
+       __u8    sdiag_protocol;
+       __u8    idiag_ext;
+       __u8    pad;
+       __u32   idiag_states;
+       struct inet_diag_sockid id;
+};
+</code></pre>
+
+<p><ul>
+<li>
+<p>Brilliant article on how to query Netlink <a href="https://kristrev.github.io/2013/07/26/passive-monitoring-of-sockets-on-linux">https://kristrev.github.io/2013/07/26/passive-monitoring-of-sockets-on-linux</a></p>
+</li>
+<li>
+<p>Not that informative but shows serious perf gains can be made from netlink over proc reading<a href="https://www.vividcortex.com/blog/2014/09/22/using-netlink-to-optimize-socket-statistics/">https://www.vividcortex.com/blog/2014/09/22/using-netlink-to-optimize-socket-statistics/</a></p>
+</li>
+</ul>
+<p>Netlink is fussy fussy when it comes to the msg being exactly how it expects it. I had a hell of a time getting errors back from it, or alternatively it just hanging when listening for the recvfrom. You need to make sure that you are giving the kernel the correct kernel struct exactly as it wants it. Forunately I found a repo online that had some netlink code in python, stripped it down &amp; ported it to python3 and ended up with a simple inet_diag request that parsed the socket table and could give me all the info from a inet_diag_msg struct. <a href="https://github.com/william20111/python_netlink">Here on github</a></p>
+<p>If your interested in a more robust and generic netlink lib in python, facebook have a great one called gnlpy. I should probably have used this, but while learning the simpler the better.</p>
+<p>The problem with this python tooling was that it churned the CPU quite heavily when running on heavily loaded machines it was building structs &amp; dicts for each socket and when your machine has 200k sockets that can be expensive. Probably could have spent time making it more performant in python. But I have been playing with rust recently and quite enjoying it, so what better excuse did i need for another rewrite in something that should give me more speed and less resources. After porting to rust it can run smoothly without any cpu churn while collecting the stats for you. You can find the tool <a href="https://github.com/william20111/rust-inet-diag">here on  github</a> and it works great for collecting socket info. Im adding other options to it with some ss functionality etc. Going to add a daemon mode so it can run and send the stats you need to statsd listener.</p>
+<p>I learned lots from what just seemed like a timeout issue on a java app. In summary</p>
+<ul>
+<li>Use netlink rather than parsing proc. It can be expensive at scale</li>
+<li>Rust makes things flyyyyy!</li>
+<li>Facebook has a pretty cool netlink lib called gnlpy. Really should port my code to use that. And try to get it to run little faster without the cpu churn..</li></p>
+
+
+		
+	</div>
+
+	<div class="pagination">
+		<a href="/posts/rc-local/" class="left arrow">&#8592;</a>
+		<a href="/posts/new-blog/" class="right arrow">&#8594;</a>
+
+		<a href="#" class="top">Top</a>
+	</div>
+</main>
+
+
+        		<footer>
+			<span>
+			&copy; <time datetime="2019-02-27 20:40:04.414501 &#43;0000 GMT m=&#43;0.060174611">2019</time> . Made with <a href='https://gohugo.io'>Hugo</a> using the <a href='https://github.com/EmielH/tale-hugo/'>Tale</a> theme.
+			</span>
+		</footer>
+
+    </body>
+</html>

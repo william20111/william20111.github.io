@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes" ?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Networking on grumpysysadm</title>
+    <link>https://william20111.github.io/tags/networking/</link>
+    <description>Recent content in Networking on grumpysysadm</description>
+    <generator>Hugo -- gohugo.io</generator>
+    <language>en-us</language>
+    <lastBuildDate>Mon, 21 Aug 2017 13:23:10 +0100</lastBuildDate>
+    
+	<atom:link href="https://william20111.github.io/tags/networking/index.xml" rel="self" type="application/rss+xml" />
+    
+    
+    <item>
+      <title>SYN Cookies &amp; Linux</title>
+      <link>https://william20111.github.io/posts/tcp-linux/</link>
+      <pubDate>Mon, 21 Aug 2017 13:23:10 +0100</pubDate>
+      
+      <guid>https://william20111.github.io/posts/tcp-linux/</guid>
+      <description>This started as debugging application timeouts and turned into a deep dive into linux tcp ip stack writing my own netlink query tools. Might be long. Might be rambling. Any comments appreciated.
+Recently when debugging a timeout issues on a java application, I stumbled upon an interesting problem. The application was making requests to a Loab balancer virtual IP and getting a connection timeout exception in the logs. Unsure of why this was i went poking into nstat counters to see how the LBdealing with all its connections.</description>
+    </item>
+    
+  </channel>
+</rss>
